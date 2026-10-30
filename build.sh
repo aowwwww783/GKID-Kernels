@@ -269,6 +269,19 @@ fi
 echo "::endgroup::"
 set +eo pipefail
 
+# ====================================================
+# 萌新自救：自动修复 F2FS do_page_cache_ra 空指针崩溃
+# ====================================================
+echo ">>> 正在自动修复 readahead.c 漏洞..."
+if grep -q "do_page_cache_ra(ractl, ra->size, ra->async_size);" mm/readahead.c; then
+    # 找到漏洞代码并替换为安全的带边界检查版本
+    sed -i 's/do_page_cache_ra(ractl, ra->size, ra->async_size);/if (ra->size > index - start) do_page_cache_ra(ractl, ra->size - (index - start), ra->async_size);/g' mm/readahead.c
+    echo ">>> 修复成功！已打上安全补丁。"
+else
+    echo ">>> 警告：未找到原始代码，可能已被其他补丁修改，跳过。"
+fi
+# ====================================================
+
 AK3_ZIP_NAME=${AK3_ZIP_NAME//KVER/$LINUX_VERSION}
 AK3_ZIP_NAME=${AK3_ZIP_NAME//VARIANT/$VARIANT}
 
