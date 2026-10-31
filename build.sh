@@ -270,15 +270,17 @@ echo "::endgroup::"
 set +eo pipefail
 
 # ====================================================
-# 萌新自救：自动修复 F2FS do_page_cache_ra 空指针崩溃
+# 暴力强制修复 readahead.c 空指针崩溃
 # ====================================================
-echo ">>> 正在自动修复 readahead.c 漏洞..."
-if grep -q "do_page_cache_ra(ractl, ra->size, ra->async_size);" mm/readahead.c; then
-    # 找到漏洞代码并替换为安全的带边界检查版本
-    sed -i 's/do_page_cache_ra(ractl, ra->size, ra->async_size);/if (ra->size > index - start) do_page_cache_ra(ractl, ra->size - (index - start), ra->async_size);/g' mm/readahead.c
-    echo ">>> 修复成功！已打上安全补丁。"
+echo ">>> 开始使用正则表达式暴力修复 readahead.c 漏洞..."
+if [ -f mm/readahead.c ]; then
+    # 使用 Perl 暴力匹配任意空白字符和换行，强行替换
+    perl -0777 -pi -e 's/do_page_cache_ra\s*\(\s*ractl\s*,\s*ra->size\s*,\s*ra->async_size\s*\)/if (ra->size > index - start) do_page_cache_ra(ractl, ra->size - (index - start), ra->async_size)/g' mm/readahead.c
+    echo ">>> 强制替换执行完毕！验证结果："
+    # 把修改后的代码打印到日志里
+    grep -n -A 1 -B 1 "if (ra->size > index - start)" mm/readahead.c || echo "❌ 依然没找到代码"
 else
-    echo ">>> 警告：未找到原始代码，可能已被其他补丁修改，跳过。"
+    echo "❌ 没找到 mm/readahead.c 文件！"
 fi
 # ====================================================
 
