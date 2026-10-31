@@ -270,15 +270,22 @@ echo "::endgroup::"
 set +eo pipefail
 
 # ====================================================
-# 暴力强制修复 readahead.c 空指针崩溃
+# readahead.c 空指针崩溃3 (精准匹配带 false 的)
 # ====================================================
-echo ">>> 开始使用正则表达式暴力修复 readahead.c 漏洞..."
+echo ">>> 开始使用补丁修复 readahead.c 漏洞..."
 if [ -f mm/readahead.c ]; then
-    # 使用 Perl 暴力匹配任意空白字符和换行，强行替换
-    perl -0777 -pi -e 's/do_page_cache_ra\s*\(\s*ractl\s*,\s*ra->size\s*,\s*ra->async_size\s*\)/if (ra->size > index - start) do_page_cache_ra(ractl, ra->size - (index - start), ra->async_size)/g' mm/readahead.c
-    echo ">>> 强制替换执行完毕！验证结果："
-    # 把修改后的代码打印到日志里
-    grep -n -A 1 -B 1 "if (ra->size > index - start)" mm/readahead.c || echo "❌ 依然没找到代码"
+    # 直接匹配带有 , false); 结尾的原代码，替换为带防下溢判断的安全代码
+    sed -i 's/do_page_cache_ra(ractl, ra->size, ra->async_size, false);/if (ra->size > index - readahead_index(ractl)) do_page_cache_ra(ractl, ra->size - (index - readahead_index(ractl)), ra->async_size, false);/g' mm/readahead.c
+    
+    echo ">>> 替换执行完毕！验证结果："
+    # 打印修改后的结果
+    grep -n "do_page_cache_ra(ractl" mm/readahead.c | grep "readahead_index"
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ 完美！漏洞代码已成功替换为安全代码！"
+    else
+        echo "❌ 依然没找到代码"
+    fi
 else
     echo "❌ 没找到 mm/readahead.c 文件！"
 fi
