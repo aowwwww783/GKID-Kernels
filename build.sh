@@ -270,27 +270,23 @@ echo "::endgroup::"
 set +eo pipefail
 
 # ====================================================
-# readahead.c 空指针崩溃3 (精准匹配带 false 的)
+#  MTK readahead 漏洞
 # ====================================================
-echo ">>> 开始使用补丁修复 readahead.c 漏洞..."
+echo ">>> 开始使用终极补丁修复 readahead.c..."
 if [ -f mm/readahead.c ]; then
-    # 直接匹配带有 , false); 结尾的原代码，替换为带防下溢判断的安全代码
+    # 补丁1：修复 page_cache_ra_order 里的下溢（上次的补丁）
     sed -i 's/do_page_cache_ra(ractl, ra->size, ra->async_size, false);/if (ra->size > index - readahead_index(ractl)) do_page_cache_ra(ractl, ra->size - (index - readahead_index(ractl)), ra->async_size, false);/g' mm/readahead.c
     
-    echo ">>> 替换执行完毕！验证结果："
-    # 打印修改后的结果
-    grep -n "do_page_cache_ra(ractl" mm/readahead.c | grep "readahead_index"
+    # 补丁2：修复 MTK 强制预读循环中空指针未判断的 Bug（这次的新补丁）
+    # 它会把 if (!IS_ERR(folio)) 替换为 if (!IS_ERR_OR_NULL(folio))
+    sed -i 's/if (!IS_ERR(folio))/if (!IS_ERR_OR_NULL(folio))/g' mm/readahead.c
     
-    if [ $? -eq 0 ]; then
-        echo "✅ 完美！漏洞代码已成功替换为安全代码！"
-    else
-        echo "❌ 依然没找到代码"
-    fi
+    echo ">>> 替换执行完毕！验证结果："
+    grep -n "IS_ERR_OR_NULL(folio)" mm/readahead.c && echo "✅ 完美！空指针防御已生效！"
 else
     echo "❌ 没找到 mm/readahead.c 文件！"
 fi
 # ====================================================
-
 AK3_ZIP_NAME=${AK3_ZIP_NAME//KVER/$LINUX_VERSION}
 AK3_ZIP_NAME=${AK3_ZIP_NAME//VARIANT/$VARIANT}
 
