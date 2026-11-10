@@ -230,11 +230,9 @@ if [ "$KSU" = "KSU" ]; then
     clone_susfs
 
     cd KernelSU
-    #git reset --hard "61c6313"
     git reset --soft HEAD~1
     apply_patch_file "$PATCHES_DIR/0001-feat-avc-log-spoofing.patch"
     apply_patch_file "$PATCHES_DIR/0001-feat-add-multiple-managers.patch"
-    #apply_patch_file "$PATCHES_DIR/0001-feat-throne_tracker-offload-to-kthread.patch"
     apply_patch_file "$SUSFS_PATCHES/KernelSU/10_enable_susfs_for_ksu.patch"
     apply_patch_file "$PATCHES_DIR/0001-feat-escape-persistent_allow_list-to-kthread.patch"
     apply_patch_file "$PATCHES_DIR/0001-feat-supercalls-allow-userspace-to-pull-list-entries.patch"
@@ -247,9 +245,7 @@ if [ "$KSU" = "KSU" ]; then
     bash "KernelSU/kernel/setup.sh" "main"
 
     apply_susfs_patches
-
   fi
-
 fi
 
 if [ "$KSU_COMPAT" = "true" ]; then
@@ -270,23 +266,38 @@ echo "::endgroup::"
 set +eo pipefail
 
 # ====================================================
-#  MTK readahead 漏洞
+#  修复 1: MTK readahead 漏洞
 # ====================================================
 echo ">>> 开始使用终极补丁修复 readahead.c..."
 if [ -f mm/readahead.c ]; then
-    # 补丁1：修复 page_cache_ra_order 里的下溢（上次的补丁）
     sed -i 's/do_page_cache_ra(ractl, ra->size, ra->async_size, false);/if (ra->size > index - readahead_index(ractl)) do_page_cache_ra(ractl, ra->size - (index - readahead_index(ractl)), ra->async_size, false);/g' mm/readahead.c
-    
-    # 补丁2：修复 MTK 强制预读循环中空指针未判断的 Bug（这次的新补丁）
-    # 它会把 if (!IS_ERR(folio)) 替换为 if (!IS_ERR_OR_NULL(folio))
     sed -i 's/if (!IS_ERR(folio))/if (!IS_ERR_OR_NULL(folio))/g' mm/readahead.c
-    
-    echo ">>> 替换执行完毕！验证结果："
-    grep -n "IS_ERR_OR_NULL(folio)" mm/readahead.c && echo "✅ 完美！空指针防御已生效！"
+    echo ">>> readahead.c 替换执行完毕！验证结果："
+    grep -n "IS_ERR_OR_NULL(folio)" mm/readahead.c && echo "✅ 完美！F2FS 空指针防御已生效！"
 else
     echo "❌ 没找到 mm/readahead.c 文件！"
 fi
+
 # ====================================================
+#  修复 2: MTK 充电 500000 死循环 (-95 错误)
+# ====================================================
+echo ">>> 开始修复 MTK 充电死循环..."
+MTK_CHG_FILE="drivers/misc/mediatek/charger/mtk_charger.c"
+if [ -f "$MTK_CHG_FILE" ]; then
+    # 1. 在报错打印的下一行强行插入 ret = 0; 截断死循环
+    sed -i '/get charging current failed/a\        ret = 0;' "$MTK_CHG_FILE"
+    
+    # 2. (可选保险) 将文件内特定的 -EOPNOTSUPP 返回值改为 0
+    sed -i 's/return -EOPNOTSUPP;/return 0;/g' "$MTK_CHG_FILE"
+    
+    echo ">>> 替换执行完毕！验证结果："
+    # 如果没搜到，说明路径不对或者代码变了，打印警告
+    grep -A 1 "get charging current failed" "$MTK_CHG_FILE" || echo "⚠️ 警告：未找到目标字符串，请检查源码路径！"
+else
+    echo "❌ 没找到 $MTK_CHG_FILE 文件！"
+fi
+# ====================================================
+
 AK3_ZIP_NAME=${AK3_ZIP_NAME//KVER/$LINUX_VERSION}
 AK3_ZIP_NAME=${AK3_ZIP_NAME//VARIANT/$VARIANT}
 
@@ -344,7 +355,6 @@ make ${MAKE_ARGS[@]} "$KERNEL_DEFCONFIG"
 echo "::endgroup::"
 
 if susfs_included; then
-
   log "DEBUG: Checking defconfig for SUSFS"
   grep -i susfs ./arch/arm64/configs/gki_defconfig || error "SUSFS NOT FOUND in defconfig!"
   echo ""
@@ -358,7 +368,6 @@ if susfs_included; then
     warning "SUSFS in defconfig but not in .config - checking dependencies..."
     grep "depends on" $(find . -name "Kconfig" -exec grep -l "KSU_SUSFS" {} \;) 2>/dev/null || error "No dependency info found"
   fi
-
 fi
 
 if [ "$TEST" = "yes" ]; then
