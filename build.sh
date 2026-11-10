@@ -279,22 +279,25 @@ else
 fi
 
 # ====================================================
-#  修复 2: MTK 充电 500000 死循环 (-95 错误)
+#  修复 2: MTK 充电 500000 死循环 (动态搜索版)
 # ====================================================
 echo ">>> 开始修复 MTK 充电死循环..."
-MTK_CHG_FILE="drivers/misc/mediatek/charger/mtk_charger.c"
-if [ -f "$MTK_CHG_FILE" ]; then
-    # 1. 在报错打印的下一行强行插入 ret = 0; 截断死循环
-    sed -i '/get charging current failed/a\        ret = 0;' "$MTK_CHG_FILE"
-    
-    # 2. (可选保险) 将文件内特定的 -EOPNOTSUPP 返回值改为 0
-    sed -i 's/return -EOPNOTSUPP;/return 0;/g' "$MTK_CHG_FILE"
-    
-    echo ">>> 替换执行完毕！验证结果："
-    # 如果没搜到，说明路径不对或者代码变了，打印警告
-    grep -A 1 "get charging current failed" "$MTK_CHG_FILE" || echo "⚠️ 警告：未找到目标字符串，请检查源码路径！"
+# 在所有驱动的 C 代码里，全局搜索包含报错字符串或核心函数的文件
+CHG_FILES=$(grep -rl "get charging current failed" drivers/ || true)
+if [ -z "$CHG_FILES" ]; then
+    CHG_FILES=$(grep -rl "psy_charger_set_property" drivers/ || true)
+fi
+
+if [ -n "$CHG_FILES" ]; then
+    for f in $CHG_FILES; do
+        echo "✅ 锁定目标文件: $f"
+        # 打入防死循环补丁
+        sed -i '/get charging current failed/a\        ret = 0;' "$f"
+        sed -i 's/return -EOPNOTSUPP;/return 0;/g' "$f"
+    done
+    echo ">>> 充电死循环补丁打入完毕！"
 else
-    echo "❌ 没找到 $MTK_CHG_FILE 文件！"
+    echo "❌ 警告：在 drivers/ 目录下全局搜索未找到充电相关代码，可能该驱动未编译进内核（可能是 .ko 模块形式）。"
 fi
 # ====================================================
 
